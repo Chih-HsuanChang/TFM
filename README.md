@@ -32,8 +32,6 @@ This study uses the **2024 Taiwan Communication Survey (TCS), Phase 3 Year 3**, 
 Researchers who wish to reproduce the analysis must request the dataset directly from SRDA:
 - SRDA: <https://srda.sinica.edu.tw/>
 
-Once access is granted, the data file can be placed in `data/` and the analysis re-run as described above.
-
 ## Disclaimer
 
 This project was developed exclusively for academic purposes as part of a Master's thesis at master program of comupational social science in Universidad Carlos III de Madrid. The code and materials are intended for research and educational use only. The underlying survey data remain the property of Academia Sinica / SRDA and are governed by their terms of use.
