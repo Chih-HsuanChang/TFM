@@ -1,0 +1,37 @@
+\begin{table}
+\centering
+\begin{tblr}[         %% tabularray outer open
+]                     %% tabularray outer close
+{                     %% tabularray inner open
+colspec={Q[]Q[]Q[]Q[]},
+hline{2}={1-4}{solid, black, 0.05em},
+hline{20}={1-4}{solid, black, 0.05em},
+hline{1}={1-4}{solid, black, 0.08em},
+hline{23}={1-4}{solid, black, 0.08em},
+column{2-4}={}{halign=c},
+column{1}={}{halign=l},
+}                     %% tabularray inner close
+& Model 1 (Base) & Model 2 (Demographics) & Model 3 (Trust in News) \\
+(Intercept) & \num{2.308} [\num{1.635}, \num{3.258}] & \num{0.381} [\num{0.128}, \num{1.136}] & \num{0.665} [\num{0.190}, \num{2.322}] \\
+breadth & \num{1.115} [\num{1.027}, \num{1.210}] & \num{1.144} [\num{1.026}, \num{1.276}] & \num{1.139} [\num{1.019}, \num{1.272}] \\
+age &  & \num{1.023} [\num{1.007}, \num{1.039}] & \num{1.023} [\num{1.007}, \num{1.039}] \\
+genderfemale &  & \num{0.873} [\num{0.651}, \num{1.170}] & \num{0.912} [\num{0.679}, \num{1.226}] \\
+edumedium &  & \num{1.527} [\num{0.941}, \num{2.478}] & \num{1.480} [\num{0.910}, \num{2.408}] \\
+eduhigh &  & \num{2.640} [\num{1.552}, \num{4.490}] & \num{2.523} [\num{1.473}, \num{4.324}] \\
+employstudying &  & \num{1.080} [\num{0.553}, \num{2.110}] & \num{1.055} [\num{0.541}, \num{2.056}] \\
+employretired &  & \num{0.677} [\num{0.388}, \num{1.182}] & \num{0.677} [\num{0.389}, \num{1.177}] \\
+employhomemaker &  & \num{0.613} [\num{0.347}, \num{1.085}] & \num{0.631} [\num{0.355}, \num{1.122}] \\
+employunemployed &  & \num{0.890} [\num{0.461}, \num{1.718}] & \num{0.859} [\num{0.448}, \num{1.648}] \\
+income\_quantile2 &  & \num{1.186} [\num{0.771}, \num{1.824}] & \num{1.192} [\num{0.775}, \num{1.835}] \\
+income\_quantile3 &  & \num{1.287} [\num{0.792}, \num{2.090}] & \num{1.300} [\num{0.796}, \num{2.124}] \\
+income\_quantile4 &  & \num{1.561} [\num{0.922}, \num{2.644}] & \num{1.527} [\num{0.904}, \num{2.580}] \\
+t\_tvn &  &  & \num{0.985} [\num{0.973}, \num{0.998}] \\
+t\_papern &  &  & \num{1.001} [\num{0.988}, \num{1.014}] \\
+t\_broadcastn &  &  & \num{1.008} [\num{0.996}, \num{1.021}] \\
+t\_magn &  &  & \num{1.001} [\num{0.989}, \num{1.013}] \\
+t\_onlinen &  &  & \num{0.996} [\num{0.987}, \num{1.005}] \\
+Num.Obs. & \num{1529} & \num{1529} & \num{1529} \\
+R2 & \num{0.005} & \num{0.038} & \num{0.045} \\
+R2 Adj. & \num{0.004} & \num{0.030} & \num{0.034} \\
+\end{tblr}
+\end{table}

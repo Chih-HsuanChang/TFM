@@ -1,0 +1,465 @@
+---
+title: "TFM Perceived Polarization"
+author: "Chih-Hsuan Chang"
+format: html
+editor: visual
+---
+
+## Library
+
+```{r lib, message=FALSE, warning=FALSE}
+# data cleaning and table format
+library(readr)
+library(tidyverse)
+library(gtsummary)
+library(flextable)
+library(Hmisc)
+library(jtools) # cor-plot
+
+# survey design
+library(survey)
+library(car)
+library(srvyr)
+library(svyVGAM)
+
+# weighted correlation matrix
+library(fastDummies)
+library(weights)
+library(ggcorrplot)
+
+# table presentation
+library(texreg)
+library(modelsummary)
+```
+
+## Import Data
+
+```{r import, warning=FALSE}
+tcs24 <- read_csv("data.csv")
+```
+
+## Clean Data
+
+```{r clean-data}
+data <- tcs24 |> 
+  dplyr::select(sel_gen, age, edugp, vo1, vo5,
+                vk1m01, vk2m01:vk2m03, vk2m07:vk2m09, vk2m11, vk3m01,
+                vj4_1:vj4_5,
+                vjb2m01,
+                wr_report) |> 
+  rename(gender = sel_gen, edu = edugp, employ = vo1, income = vo5,
+         line = vk1m01, fb = vk2m01, ig = vk2m02, x = vk2m03, tiktok = vk2m07,
+         dcard = vk2m08, ptt = vk2m09, threads = vk2m11, youtube = vk3m01,
+         polarization = vjb2m01,
+         t_tvn = vj4_1, t_papern = vj4_2, t_broadcastn = vj4_3, t_magn = vj4_4,
+         t_onlinen = vj4_5
+         ) |> 
+  mutate(
+    age = case_when(
+      age == 998 ~ NA,
+      TRUE ~ age
+    ),
+    gender = case_when(
+      gender == 1 ~ "male",
+      gender == 2 ~ "female",
+      TRUE ~ NA
+    ),
+    gender = factor(gender, levels = c("male", "female")),
+    edu = case_when(
+      edu %in% c(1, 2) ~ "low",
+      edu %in% c(3, 4) ~ "medium",
+      edu %in% c(5, 6) ~ "high", # college and graduate school
+      TRUE ~ NA
+    ),
+    edu = factor(edu, levels = c("low", "medium", "high"), ordered = FALSE),
+    employ = case_when(
+      employ %in% c(1:5) ~ "employed",
+      employ %in% c(7, 8) ~ "studying",
+      employ %in% c(6, 11:13) ~ "unemployed",
+      employ == 9 ~ "retired",
+      employ == 10 ~ "homemaker",
+      TRUE ~ NA
+    ),
+    employ = factor(employ, levels = c(
+      "employed", "studying", "retired", "homemaker", "unemployed")),
+    income = case_when(
+      income %in% c(1:23) ~ income,
+      TRUE ~ NA
+    ),
+    polarization = replace(polarization, polarization %in% 96:99, "NA"),
+    polarization = factor(polarization,
+                          levels = c(0, 1)
+    ),
+    across(line:youtube, as.factor),
+    t_tvn = case_when(
+      t_tvn %in% c(9999, 998, 997, 9996) ~ NA,
+      TRUE ~ t_tvn
+    ), 
+    t_papern = case_when(
+      t_papern %in% c(9999, 998, 997, 9996) ~ NA,
+      TRUE ~ t_papern
+    ), 
+    t_broadcastn = case_when(
+      t_broadcastn %in% c(9999, 998, 997, 9996) ~ NA,
+      TRUE ~ t_broadcastn
+    ), 
+    t_magn = case_when(
+      t_magn %in% c(9999, 998, 997, 9996) ~ NA,
+      TRUE ~ t_magn
+    ), 
+    t_onlinen = case_when(
+      t_onlinen %in% c(9999, 998, 997, 9996) ~ NA,
+      TRUE ~ t_onlinen
+    ), 
+    across(t_tvn:t_onlinen, as.numeric),
+    )
+```
+
+```{r income_quantile}
+df <- data %>%
+  mutate(income_num = as.numeric(income))
+
+weighted_cuts <- wtd.quantile(
+  df$income, 
+  weights = df$wr_report, 
+  probs = seq(0, 1, by = 0.25)
+)
+
+df <- df %>%
+  mutate(
+    income_quantile = cut(
+      income_num, 
+      breaks = weighted_cuts, 
+      include.lowest = TRUE,
+      # Add clear, descriptive labels for your model output
+      labels = c(1:4)
+    ),
+    # Ensure it is an ordered factor for multiple imputation and regression
+    income_quantile = factor(income_quantile, ordered = FALSE)
+  ) %>%
+  select(-income_num) # Clean up the temporary numeric column
+
+data$income_quantile <- df$income_quantile
+data <- data |> 
+  select(-income) |> 
+  relocate(income_quantile, .before = line)
+```
+
+## Create Platform Breadth
+
+```{r platform-breadth}
+platform_vars <- c("line", "fb", "ig", "x", "tiktok", "dcard", "ptt", "threads",  "youtube")
+data <- data |> 
+  mutate(dplyr::across(
+    dplyr::all_of(platform_vars), 
+    ~ as.numeric(as.character(.))
+  )) |> 
+  rowwise() |> 
+  mutate(
+    breadth = sum(dplyr::c_across(dplyr::all_of(platform_vars)))
+  ) %>%
+  ungroup()
+```
+
+## Explore the Data
+
+### correlation matrix
+
+```{r cor-matrix}
+# 1. Create dummy variables for your categorical columns
+# This splits your nominal variables while leaving numeric/binary variables untouched
+matrix_data <- dummy_cols(
+  data |> drop_na(), 
+  select_columns = c("edu", "employ", "gender", "income_quantile"), # Specify your nominal variables here
+  remove_selected_columns = TRUE # Removes the original text-based column
+)
+
+# 2. Subset the data to only the variables you want in the matrix
+# Ensure ordinal variables (like education) are coded as numeric (e.g., 1, 2, 3)
+vars_for_matrix <- matrix_data %>%
+  drop_na() |> 
+  dplyr::select(age, starts_with(c("edu_", "gender_", "employ_", "income_quantile_")),
+         line, fb, ig, x, tiktok, dcard, ptt, threads, youtube,
+         polarization, t_tvn, t_papern, t_broadcastn, t_magn, t_onlinen, wr_report) |> 
+  mutate(across(everything(), ~ as.numeric(as.character(.))))
+
+svy_matrix_design <- svydesign(
+  ids = ~1, 
+  weights = ~wr_report, 
+  data = vars_for_matrix,
+  na.rm = TRUE
+)
+
+# 3. Use svycor with na.rm = TRUE 
+# This handles the weights AND does safe pairwise deletion for your NAs automatically
+# Note: svycor automatically correlates all numeric variables in the design object
+final_matrix <- svycor(~ age + gender_female + edu_low + edu_medium + edu_high + employ_homemaker + employ_studying + employ_unemployed + employ_retired + employ_employed + income_quantile_1 + income_quantile_2 + income_quantile_3 + income_quantile_4 + fb + ig + x + tiktok + dcard + ptt + threads + youtube + t_tvn + t_papern + t_broadcastn + t_magn + t_onlinen + polarization, design = svy_matrix_design, sig.stats = TRUE)
+```
+
+```{r cor-plot, warning=FALSE}
+# 1. Extract the actual correlation matrix from the svycor object
+cor_matrix <- final_matrix$cor
+
+# 2. Extract the p-values so we can mark non-significant correlations
+p_matrix <- final_matrix$p
+
+# 3. Generate the Heatmap
+corplot <- 
+  ggcorrplot(
+  cor_matrix,
+  method = "square",       # Shape of the heatmap cells (can also be "circle")
+  type = "lower",          # Only show the bottom half to avoid visual duplication
+  lab = TRUE,              # Prints the actual correlation numbers inside the squares
+  lab_size = 2,            # Adjust text size to prevent overlapping if you have many variables
+  p.mat = p_matrix,        # Feed in the p-values
+  sig.level = 0.05,        # Set your significance threshold
+  insig = "blank",         # "blank" hides insignificant squares, "pch" puts an X over them
+  colors = c("#6D9EC1", "white", "#E46726"), # Classic blue (negative) to red (positive) gradient
+  title = "Weighted Correlation Matrix",
+  legend.title = "Correlation\nCoefficient"
+)
+print(corplot)
+
+#ggsave("correlation heatmap.jpg", corplot, width = 12, height = 12, dpi = 300)
+```
+
+### NA values
+
+```{r na-table}
+na_summary <- data |> 
+  # Calculate ratio of NAs for every column
+  summarise(across(everything(), ~ mean(is.na(.)))) |> 
+  pivot_longer(
+    cols = everything(), 
+    names_to = "Column_Name", 
+    values_to = "NA_Ratio"
+  ) |> 
+  arrange(desc(NA_Ratio))
+```
+
+```{r na-pattern}
+gg_miss_var(data, show_pct = TRUE) +
+  theme_minimal() +
+  labs(
+    title = "Percentage of Missing Data by Variable",
+  )
+
+gg_miss_fct(x = data, fct = polarization)
+gg_miss_fct(x = data, fct = breadth)
+na_breadth <- gg_miss_fct(x = data, fct = breadth)
+gg_miss_case(x = data)
+#ggsave("fct_NA in breadth.jpg", na_breadth, width = 12, height = 10, dpi = 300)
+```
+
+## Prepare Data
+
+### breadth data
+
+```{r lwd-data}
+lwd_data <- data |> drop_na()
+
+lwd_data
+```
+
+### repertoire data
+
+```{r repertoire}
+lwd_data_rep <- lwd_data %>%
+  rowwise() %>%
+  mutate(
+    rep_label = paste(platform_vars[dplyr::c_across(dplyr::all_of(platform_vars)) == 1], collapse = " + ")
+  ) %>%
+  group_by(rep_label) %>%
+  filter(sum(wr_report) >= 20) %>%
+  ungroup()
+
+lwd_data_rep
+```
+
+## Survey Design
+
+### breadth design
+
+```{r svy-breadth}
+svy_breadth <- svydesign(
+  ids     = ~1,           
+  strata  = NULL,         
+  weights = ~wr_report,   
+  data    = lwd_data,
+  nest    = FALSE
+)
+```
+
+### repertoire design
+
+```{r svy-rep}
+svy_rep <- svydesign(
+  ids     = ~1,           
+  strata  = NULL,         
+  weights = ~wr_report,   
+  data    = lwd_data_rep,
+  nest    = FALSE
+)
+```
+
+## Descriptive Statistics
+
+### breadth descriptive
+
+```{r ds-breadth}
+svymean(~ breadth + age + gender + edu + employ + income_quantile + t_tvn + t_papern + t_broadcastn + t_magn + t_onlinen + polarization,
+        design = svy_breadth, na.rm = TRUE)
+
+svysd(~ breadth + age + t_tvn + t_papern + t_broadcastn + t_magn + t_onlinen, design = svy_breadth, na.rm = TRUE)
+```
+
+### repertoire descriptive statistic
+
+```{r ds-rep}
+ds_table_rep <- lwd_data_rep |> 
+  tbl_summary(
+    statistic = list(all_continuous() ~ "{mean} ({sd})",
+                     all_categorical() ~ "{n} ({p}%)"),
+    missing = "always", # Shows missing data counts/percentages!
+    missing_text = "missing data"
+  ) |> 
+  bold_labels() |> 
+  as_flex_table() |> 
+  # 3. Use flextable to make it APA style and save to Word
+  flextable::theme_apa() |> 
+  flextable::autofit()
+
+# flextable::save_as_image(path = "outputs/table1_apa.docx")
+
+svymean(~ rep_label + age + gender + edu + employ + income_quantile + t_tvn + t_papern + t_broadcastn + t_magn + t_onlinen + polarization,
+        design = svy_rep, na.rm = TRUE)
+```
+
+## Constructing Models
+
+### just breadth model
+
+```{r base_model}
+model_1 <- svyglm(polarization ~ breadth, family = quasibinomial(), design = svy_breadth)
+```
+
+### with demographic model
+
+```{r base_model}
+model_2 <- svyglm(polarization ~ age + gender + edu + employ + income_quantile + breadth, family = quasibinomial(), design = svy_breadth)
+```
+
+### trust in news media model
+
+```{r}
+model_3 <- svyglm(polarization ~ age + gender + edu + employ + income_quantile + t_tvn + t_papern + t_broadcastn + t_magn + t_onlinen + breadth, family = quasibinomial(), design = svy_breadth)
+```
+
+### individual platform model
+
+```{r}
+model_5 <- svyglm(polarization ~ age + gender + edu + employ + income_quantile + t_tvn + t_papern + t_broadcastn + t_magn + t_onlinen + line + fb + ig + x + tiktok + dcard + ptt + threads+ youtube, family = quasibinomial(), design = svy_rep)
+```
+
+### repertoire model
+
+```{r rep_model}
+model_4 <- svyglm(polarization ~ age + gender + edu + employ + income_quantile + t_tvn + t_papern + t_broadcastn + t_magn + t_onlinen + rep_label, family = quasibinomial(), design = svy_rep)
+```
+
+## Model Summary
+
+**Estimator and p values**
+
+```{r breadth-model-sum, warning=FALSE}
+modelsummary(
+  list(
+    "Demogrphic Variables" = demo_model,
+    "Trust in News Media" = trust_model,
+    "Platform Breadth" = breadth_model,
+    "Social Media Repertoir" = rep_model),
+  exponentiate = TRUE,
+  statistic = "({std.error})",
+  stars = c('*' = .05, '**' = .01, '***' = .001),
+  title = "Logistic Regression Results: Perceived Polarization (Odds Ratios)",
+  output = "latex"
+)
+```
+
+```{r rep-model-sum, warning=FALSE}
+coef_first_half <- c("age", "genderfemale", "edumedium", "eduhigh", 
+                     "employstudying", "employretired", "employhomemaker",
+                     "employunemployed", "income_quantile2", "income_quantile3",
+                     "income_quantile4", "t_tvn", "t_papern", "t_broadcastn", "t_magn",
+                     "t_onlinen") # first half of vars
+coef_second_half <- c("rep_labelline + fb", 
+                      "rep_labelline + fb + ig",
+                      "rep_labelline + fb + youtube",
+                      "rep_labelline + ig + youtube",
+                      "rep_labelline + fb + ig + youtube",
+                      "rep_labelline + fb + ig + tiktok + youtube",
+                      "rep_labelline + fb + ig + dcard + youtube",
+                      "rep_labelline + fb + ig + threads + youtube",
+                      "rep_labelline + fb + ig + dcard + threads + youtube",
+                      "rep_labelline + fb + ig + tiktok + threads + youtube",
+                      "rep_labelline + fb + ig + tiktok + dcard + threads + youtube",
+                      "rep_labelline + youtub") # remaining vars
+
+modelsummary(
+  list(
+    "Social Media Repertoire" = rep_model),
+  exponentiate = TRUE,
+  statistic = "({std.error})",
+  stars = c('*' = .05, '**' = .01, '***' = .001),
+  coef_map = coef_first_half,
+  gof_omit = ".*",  # omit fit stats from first half
+  output = "latex"
+)
+
+modelsummary(
+  list(
+    "Social Media Repertoire" = rep_model),
+  exponentiate = TRUE,
+  statistic = "({std.error})",
+  stars = c('*' = .05, '**' = .01, '***' = .001),
+  coef_map = coef_second_half,
+  title = NULL,  # no title on second half
+  output = "latex"
+)
+```
+
+**Confidence Interval**
+
+```{r}
+# options(knitr.table.format = "latex") 
+first_table <- list(
+  "Model 1 (Base)" = model_1,
+  "Model 2 (Demographics)" = model_2,
+  "Model 3 (Trust in News)" = model_3
+)
+sec_table <- list(
+  "Model 4 (Repertoire)" = model_4,
+  "Model 5 (Individual Platform)" = model_5
+)
+
+table_1 <- modelsummary(
+  first_table,
+  output = "t1.html",
+  exponentiate = TRUE,
+  estimate = "{estimate} [{conf.low}, {conf.high}]",
+  statistic = NULL,
+  conf_level = 0.95,
+  gof_omit = "IC|Log.Lik|F|RMSE"
+  )
+
+table_2 <- modelsummary(
+  sec_table,
+  title = "Binary Logistic Reggression Models: Online Perceived Polarization",
+  output = "t2.html",
+  exponentiate = TRUE,
+  estimate = "{estimate} [{conf.low}, {conf.high}]",
+  statistic = NULL,
+  conf_level = 0.95,
+  gof_omit = "IC|Log.Lik|F|RMSE"
+  )
+```
