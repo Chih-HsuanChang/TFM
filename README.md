@@ -24,7 +24,6 @@ The thesis project consists of the following components:
 
 3. **Modeling:** estimation of binary logistic regression models. Models 1–3 use platform breadth as the focal predictor across increasingly saturated specifications; Models 4 substitute platform repertoires. Results are interpreted via odds ratios with 95% confidence intervals.
 
-```
 
 ## Note on data availability
 
